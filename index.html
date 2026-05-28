@@ -33,7 +33,8 @@
                     active: true,
                     auth: firebase.auth(),
                     db: firebase.firestore(),
-                    appId: window.__app_id || 'escola-tac-manager'
+                    appId: window.__app_id || 'escola-tac-manager',
+                    initialToken: window.__initial_auth_token
                 };
             }
         } catch (e) {
@@ -77,6 +78,7 @@
 
         function App() {
             const [isFirebase, setIsFirebase] = useState(false);
+            const [user, setUser] = useState(null);
             const [incidencies, setIncidencies] = useState([]);
             const [view, setView] = useState('list');
             const [loading, setLoading] = useState(true);
@@ -113,49 +115,77 @@
                 if (window.lucide) window.lucide.createIcons();
             });
 
-            // Lògica de connexió de dades segura
+            // 1. Inicialització de l'autenticació de Firebase (Estricta)
             useEffect(() => {
                 if (window.fb && window.fb.active) {
                     setIsFirebase(true);
                     
-                    // Autenticació anònima immediata
-                    window.fb.auth.signInAnonymously()
-                        .then((userCredential) => {
-                            const user = userCredential.user;
-                            
-                            // Escolta en temps real de Firestore
-                            const ref = window.fb.db.collection('artifacts')
-                                .doc(window.fb.appId)
-                                .collection('public')
-                                .doc('data')
-                                .collection('incidencies');
-                                
-                            return ref.onSnapshot((snapshot) => {
-                                const data = [];
-                                snapshot.forEach((doc) => {
-                                    data.push({ id: doc.id, ...doc.data() });
-                                });
-                                // Ordenar per data de creació
-                                data.sort((a, b) => {
-                                    const dateA = a.createdAt?.seconds || 0;
-                                    const dateB = b.createdAt?.seconds || 0;
-                                    return dateB - dateA;
-                                });
-                                setIncidencies(data);
-                                setLoading(false);
-                            }, (error) => {
-                                console.error("Error Firestore, canviant a local:", error);
-                                setupLocalStorageFallback();
-                            });
-                        })
-                        .catch((err) => {
-                            console.error("Error Auth, canviant a local:", err);
+                    const initAuth = async () => {
+                        try {
+                            if (window.fb.initialToken) {
+                                await window.fb.auth.signInWithCustomToken(window.fb.initialToken);
+                            } else {
+                                await window.fb.auth.signInAnonymously();
+                            }
+                        } catch (err) {
+                            console.error("Error d'autenticació, passant a local:", err);
                             setupLocalStorageFallback();
-                        });
+                        }
+                    };
+
+                    initAuth();
+
+                    // Escoltar canvis d'estat d'autenticació
+                    const unsubscribeAuth = window.fb.auth.onAuthStateChanged((u) => {
+                        if (u) {
+                            setUser(u);
+                        } else {
+                            setUser(null);
+                        }
+                    });
+
+                    return () => unsubscribeAuth();
                 } else {
                     setupLocalStorageFallback();
                 }
             }, []);
+
+            // 2. Consulta de dades de Firestore protegida per estat d'usuari autenticat (Regla 3)
+            useEffect(() => {
+                if (!isFirebase || !user) {
+                    if (!isFirebase) setupLocalStorageFallback();
+                    return;
+                }
+
+                // Ruta absoluta estricta (Regla 1) i sense consultes complexes (Regla 2)
+                const ref = window.fb.db.collection('artifacts')
+                    .doc(window.fb.appId)
+                    .collection('public')
+                    .doc('data')
+                    .collection('incidencies');
+                    
+                const unsubscribeData = ref.onSnapshot((snapshot) => {
+                    const data = [];
+                    snapshot.forEach((doc) => {
+                        data.push({ id: doc.id, ...doc.data() });
+                    });
+                    
+                    // Ordenació manual a memòria JS (Regla 2)
+                    data.sort((a, b) => {
+                        const dateA = a.createdAt?.seconds || 0;
+                        const dateB = b.createdAt?.seconds || 0;
+                        return dateB - dateA;
+                    });
+                    
+                    setIncidencies(data);
+                    setLoading(false);
+                }, (error) => {
+                    console.error("Error carregant Firebase onSnapshot, passant a local:", error);
+                    setupLocalStorageFallback();
+                });
+
+                return () => unsubscribeData();
+            }, [isFirebase, user]);
 
             const setupLocalStorageFallback = () => {
                 setIsFirebase(false);
@@ -260,7 +290,7 @@
                     createdAt: isFirebase ? firebase.firestore.Timestamp.now() : new Date().toISOString()
                 };
 
-                if (isFirebase) {
+                if (isFirebase && user) {
                     try {
                         const ref = window.fb.db.collection('artifacts')
                             .doc(window.fb.appId)
@@ -269,7 +299,7 @@
                             .collection('incidencies');
                         await ref.add({
                             ...novaIncidencia,
-                            userId: window.fb.auth.currentUser?.uid || 'anonymous'
+                            userId: user.uid
                         });
                     } catch (err) { 
                         console.error("Error desant a Firebase:", err); 
@@ -287,7 +317,7 @@
 
             // Acció d'execució d'eliminació real
             const executeDelete = async (id) => {
-                if (isFirebase) {
+                if (isFirebase && user) {
                     try {
                         const ref = window.fb.db.collection('artifacts')
                             .doc(window.fb.appId)
@@ -308,7 +338,7 @@
             const toggleStatus = async (id, currentStatus) => {
                 const newStatus = currentStatus === 'pendent' ? 'resolta' : 'pendent';
                 
-                if (isFirebase) {
+                if (isFirebase && user) {
                     const ref = window.fb.db.collection('artifacts')
                         .doc(window.fb.appId)
                         .collection('public')
@@ -506,7 +536,7 @@
 
                                     <div className="space-y-2">
                                         <label className="text-xs font-black text-slate-500 uppercase tracking-widest ml-2">Què no funciona?</label>
-                                        <textarea value={descripcio} onChange={e => setDescripcio(e.target.value)} placeholder="Explica detalladament el problema de l'equip..." className="w-full p-4 rounded-3xl bg-white border border-slate-200 h-32 outline-none focus:ring-4 focus:ring-blue-100 transition-all font-medium resize-none" required />
+                                        <textarea value={descripcio} onChange={e => setDocent && setDescripcio(e.target.value)} placeholder="Explica detalladament el problema de l'equip..." className="w-full p-4 rounded-3xl bg-white border border-slate-200 h-32 outline-none focus:ring-4 focus:ring-blue-100 transition-all font-medium resize-none" required />
                                     </div>
                                     
                                     <div className="space-y-2">
