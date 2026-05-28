@@ -18,12 +18,35 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 
     <script>
-        // Inicialització global de la base de dades
+        // =========================================================================
+        // CONFIGURACIÓ DE LA TEVA BASE DE DADES DE L'ESCOLA (FIREBASE)
+        // =========================================================================
+        // Per sincronitzar tots els dispositius en temps real de forma 100% gratuïta:
+        // 1. Entra a https://console.firebase.google.com/ i crea un projecte nou (Ex: "TAC Escola").
+        // 2. Afegeix una aplicació web ("Web app") i copia aquí les teves claus de configuració.
+        // 3. Activa "Anonymous Auth" a la pestanya Authentication.
+        // 4. Crea una base de dades "Cloud Firestore" en mode de prova.
+        // =========================================================================
+        const la_meva_configuracio_firebase = {
+            apiKey: "EL_TEU_API_KEY",
+            authDomain: "EL_TEU_AUTH_DOMAIN",
+            projectId: "EL_TEU_PROJECT_ID",
+            storageBucket: "EL_TEU_STORAGE_BUCKET",
+            messagingSenderId: "EL_TEU_MESSAGING_SENDER_ID",
+            appId: "EL_TEU_APP_ID"
+        };
+        // =========================================================================
+
         window.fb = { active: false };
         
         try {
             let firebaseConfig = null;
-            if (window.__firebase_config) {
+            
+            // Si has configurat les teves claus, les utilitzem
+            if (la_meva_configuracio_firebase.apiKey !== "EL_TEU_API_KEY") {
+                firebaseConfig = la_meva_configuracio_firebase;
+            } else if (window.__firebase_config) {
+                // Alternativa automàtica per a l'entorn de desenvolupament de Canvas
                 firebaseConfig = JSON.parse(window.__firebase_config);
             }
             
@@ -38,7 +61,7 @@
                 };
             }
         } catch (e) {
-            console.warn("Corrent en mode d'emmagatzematge local.");
+            console.warn("Corrent en mode d'emmagatzematge local per defecte.");
         }
     </script>
 
@@ -150,14 +173,14 @@
                 }
             }, []);
 
-            // 2. Consulta de dades de Firestore protegida per estat d'usuari autenticat (Regla 3)
+            // 2. Consulta de dades de Firestore protegida per estat d'usuari autenticat
             useEffect(() => {
                 if (!isFirebase || !user) {
                     if (!isFirebase) setupLocalStorageFallback();
                     return;
                 }
 
-                // Ruta absoluta estricta (Regla 1) i sense consultes complexes (Regla 2)
+                // Ruta absoluta estricta
                 const ref = window.fb.db.collection('artifacts')
                     .doc(window.fb.appId)
                     .collection('public')
@@ -170,7 +193,7 @@
                         data.push({ id: doc.id, ...doc.data() });
                     });
                     
-                    // Ordenació manual a memòria JS (Regla 2)
+                    // Ordenació manual a memòria JS
                     data.sort((a, b) => {
                         const dateA = a.createdAt?.seconds || 0;
                         const dateB = b.createdAt?.seconds || 0;
@@ -232,7 +255,7 @@
                         img.onload = () => {
                             // Reduir la mida de la foto per a un emmagatzematge òptim
                             const canvas = document.createElement('canvas');
-                            const MAX_WIDTH = 1024; // Augmentat a 1024px per a fotos de major qualitat
+                            const MAX_WIDTH = 1024;
                             const scaleSize = MAX_WIDTH / img.width;
                             canvas.width = MAX_WIDTH;
                             canvas.height = img.height * scaleSize;
@@ -536,7 +559,7 @@
 
                                     <div className="space-y-2">
                                         <label className="text-xs font-black text-slate-500 uppercase tracking-widest ml-2">Què no funciona?</label>
-                                        <textarea value={descripcio} onChange={e => setDocent && setDescripcio(e.target.value)} placeholder="Explica detalladament el problema de l'equip..." className="w-full p-4 rounded-3xl bg-white border border-slate-200 h-32 outline-none focus:ring-4 focus:ring-blue-100 transition-all font-medium resize-none" required />
+                                        <textarea value={descripcio} onChange={e => setDescripcio(e.target.value)} placeholder="Explica detalladament el problema de l'equip..." className="w-full p-4 rounded-3xl bg-white border border-slate-200 h-32 outline-none focus:ring-4 focus:ring-blue-100 transition-all font-medium resize-none" required />
                                     </div>
                                     
                                     <div className="space-y-2">
