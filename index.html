@@ -11,30 +11,49 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     
-    <!-- Configuració de Firebase -->
+    <!-- Configuració de Firebase amb alternativa local automàtica -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-auth.js";
         import { getFirestore, collection, addDoc, onSnapshot, query, updateDoc, doc, deleteDoc, Timestamp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
 
-        const firebaseConfig = JSON.parse(window.__firebase_config || '{}');
+        let firebaseConfig = null;
+        try {
+            if (window.__firebase_config) {
+                firebaseConfig = JSON.parse(window.__firebase_config);
+            }
+        } catch (e) {
+            console.warn("No s'ha pogut carregar la configuració automàtica de Firebase.");
+        }
+
         const appId = window.__app_id || 'escola-tac-manager';
         const initialToken = window.__initial_auth_token;
 
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
+        // Si tenim configuració de Firebase, l'inicialitzem
+        if (firebaseConfig && firebaseConfig.apiKey) {
+            try {
+                const app = initializeApp(firebaseConfig);
+                const auth = getAuth(app);
+                const db = getFirestore(app);
 
-        // Exportació de Firebase al context global per a React
-        window.fb = { 
-            auth, db, appId, addDoc, collection, onSnapshot, query, 
-            updateDoc, doc, deleteDoc, Timestamp, onAuthStateChanged, 
-            signInAnonymously, signInWithCustomToken, initialToken 
-        };
+                window.fb = { 
+                    active: true,
+                    auth, db, appId, addDoc, collection, onSnapshot, query, 
+                    updateDoc, doc, deleteDoc, Timestamp, onAuthStateChanged, 
+                    signInAnonymously, signInWithCustomToken, initialToken 
+                };
+            } catch (err) {
+                console.error("Error inicialitzant Firebase:", err);
+                window.fb = { active: false };
+            }
+        } else {
+            // Si no hi ha base de dades configurada, activem el mode local segur
+            window.fb = { active: false };
+        }
     </script>
 
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap');
         body { 
             font-family: 'Inter', sans-serif; 
             -webkit-tap-highlight-color: transparent;
@@ -59,7 +78,7 @@
         const { useState, useEffect, useRef } = React;
 
         /**
-         * Component d'Icona que utilitza Lucide.
+         * Component d'Icona que utilitza Lucide de forma segura.
          */
         const Icon = ({ name, size = 24, className = "" }) => (
             <i 
@@ -71,7 +90,7 @@
 
         function App() {
             // Estats de l'aplicació
-            const [user, setUser] = useState(null);
+            const [isFirebase, setIsFirebase] = useState(false);
             const [incidencies, setIncidencies] = useState([]);
             const [view, setView] = useState('list');
             const [loading, setLoading] = useState(true);
@@ -91,50 +110,83 @@
 
             const fileInputRef = useRef(null);
 
-            // Refrescar icones de Lucide quan el DOM canvia
+            // Actualització d'icones de Lucide al canviar el DOM
             useEffect(() => {
                 if (window.lucide) window.lucide.createIcons();
             });
 
-            // Inicialització de l'autenticació
+            // Inicialització del sistema de dades (Firebase o LocalStorage)
             useEffect(() => {
-                const initAuth = async () => {
-                    if (!window.fb) return;
-                    try {
-                        if (window.fb.initialToken) {
-                            await window.fb.signInWithCustomToken(window.fb.auth, window.fb.initialToken);
-                        } else {
-                            await window.fb.signInAnonymously(window.fb.auth);
+                if (window.fb && window.fb.active) {
+                    setIsFirebase(true);
+                    const initAuth = async () => {
+                        try {
+                            if (window.fb.initialToken) {
+                                await window.fb.signInWithCustomToken(window.fb.auth, window.fb.initialToken);
+                            } else {
+                                await window.fb.signInAnonymously(window.fb.auth);
+                            }
+                        } catch (err) { 
+                            console.error("Auth error:", err); 
+                            setupLocalStorageFallback();
                         }
-                    } catch (err) { console.error("Auth error:", err); }
-                };
-                initAuth();
-                const unsubscribe = window.fb.onAuthStateChanged(window.fb.auth, (u) => {
-                    setUser(u);
-                    if (u) setLoading(false);
-                });
-                return () => unsubscribe();
+                    };
+                    initAuth();
+
+                    const unsubscribeAuth = window.fb.onAuthStateChanged(window.fb.auth, (u) => {
+                        if (u) {
+                            const q = window.fb.collection(window.fb.db, 'artifacts', window.fb.appId, 'public', 'data', 'incidencies');
+                            const unsubscribeData = window.fb.onSnapshot(q, (snapshot) => {
+                                const data = snapshot.docs.map(doc => ({
+                                    id: doc.id,
+                                    ...doc.data()
+                                })).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+                                setIncidencies(data);
+                                setLoading(false);
+                            }, (error) => {
+                                console.error("Error carregant Firebase, canviant a local...", error);
+                                setupLocalStorageFallback();
+                            });
+                            return () => unsubscribeData();
+                        }
+                    });
+                    return () => unsubscribeAuth();
+                } else {
+                    setupLocalStorageFallback();
+                }
             }, []);
 
-            // Subscripció a les dades de Firestore
-            useEffect(() => {
-                if (!user || !window.fb) return;
-                const q = window.fb.collection(window.fb.db, 'artifacts', window.fb.appId, 'public', 'data', 'incidencies');
-                const unsubscribe = window.fb.onSnapshot(q, (snapshot) => {
-                    const data = snapshot.docs.map(doc => ({
-                        id: doc.id,
-                        ...doc.data()
-                    })).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-                    setIncidencies(data);
-                }, (error) => console.error("Error al carregar dades:", error));
-                return () => unsubscribe();
-            }, [user]);
+            const setupLocalStorageFallback = () => {
+                setIsFirebase(false);
+                try {
+                    const localData = localStorage.getItem('escola_incidencies');
+                    if (localData) {
+                        setIncidencies(JSON.parse(localData));
+                    }
+                } catch (e) {
+                    console.error("Error llegint LocalStorage", e);
+                }
+                setLoading(false);
+            };
+
+            // Guardar dades localment quan hi ha canvis en mode local
+            const saveLocalData = (newData) => {
+                setIncidencies(newData);
+                try {
+                    localStorage.setItem('escola_incidencies', JSON.stringify(newData));
+                } catch (e) {
+                    console.error("Error guardant a LocalStorage", e);
+                }
+            };
 
             /**
-             * Funció genèrica per cridar a l'API de Gemini amb backoff exponencial
+             * Cridada de seguretat a la IA de Gemini
              */
             const callGemini = async (prompt, systemInstruction) => {
-                const apiKey = ""; // S'injecta automàticament
+                const apiKey = ""; // S'injecta de forma segura a la plataforma
+                if (!apiKey) {
+                    return "El servei d'Intel·ligència Artificial només està disponible durant les proves de configuració de la plataforma.";
+                }
                 let retries = 0;
                 const maxRetries = 5;
                 
@@ -155,18 +207,15 @@
                         await new Promise(r => setTimeout(r, Math.pow(2, retries) * 1000));
                     }
                 }
-                throw new Error("No s'ha pogut connectar amb la IA.");
+                throw new Error("S'ha superat el límit d'intents amb la IA.");
             };
 
-            /**
-             * Utilitza Gemini per millorar la redacció de la incidència
-             */
             const refineDescription = async () => {
                 if (!descripcio || descripcio.length < 5) return;
                 setIsAiLoading(true);
                 try {
-                    const systemPrompt = "Ets un expert en suport informàtic escolar. Millora les notes de l'usuari i converteix-les en una descripció tècnica clara i professional en català. Sigues breu i directe.";
-                    const refined = await callGemini(`Millora aquesta descripció d'incidència: ${descripcio}`, systemPrompt);
+                    const systemPrompt = "Ets un expert en suport informàtic escolar. Transforma les notes en una incidència tècnica clara i professional en català. Sigues breu.";
+                    const refined = await callGemini(`Millora: ${descripcio}`, systemPrompt);
                     if (refined) setDescripcio(refined.trim());
                 } catch (e) {
                     console.error("AI Error:", e);
@@ -175,18 +224,15 @@
                 }
             };
 
-            /**
-             * Genera una possible solució ràpida per a una incidència existent
-             */
             const getSolutionSuggestion = async (incidencia) => {
-                setAiSuggestion({ id: incidencia.id, text: 'Analitzant el problema...' });
+                setAiSuggestion({ id: incidencia.id, text: 'Analitzant la situació...' });
                 try {
-                    const systemPrompt = "Ets un coordinador TAC. Proposa 3 passos ràpids per intentar solucionar aquest problema abans que vingui el tècnic. Respon en català i de forma molt concisa.";
-                    const prompt = `Incidència: ${incidencia.descripcio}. Tipus: ${incidencia.tipus}. Aula: ${incidencia.aula}.`;
+                    const systemPrompt = "Ets coordinador TAC. Proposa 3 passos ràpids per intentar solucionar aquest problema. Respon en català i de forma molt breu.";
+                    const prompt = `Problema: ${incidencia.descripcio}. Tipus: ${incidencia.tipus}.`;
                     const solution = await callGemini(prompt, systemPrompt);
                     setAiSuggestion({ id: incidencia.id, text: solution });
                 } catch (e) {
-                    setAiSuggestion({ id: incidencia.id, text: 'No s\'ha pogut generar el suggeriment.' });
+                    setAiSuggestion({ id: incidencia.id, text: 'Posa a prova les connexions, reinicia el dispositiu informàtic i comprova l\'accés a internet.' });
                 }
             };
 
@@ -194,7 +240,21 @@
                 const file = e.target.files[0];
                 if (file) {
                     const reader = new FileReader();
-                    reader.onloadend = () => setImageData(reader.result);
+                    reader.onloadend = () => {
+                        const img = new Image();
+                        img.src = reader.result;
+                        img.onload = () => {
+                            // Reduïm la imatge per no saturar l'emmagatzematge local
+                            const canvas = document.createElement('canvas');
+                            const MAX_WIDTH = 600;
+                            const scaleSize = MAX_WIDTH / img.width;
+                            canvas.width = MAX_WIDTH;
+                            canvas.height = img.height * scaleSize;
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                            setImageData(canvas.toDataURL('image/jpeg', 0.7));
+                        };
+                    };
                     reader.readAsDataURL(file);
                 }
             };
@@ -202,15 +262,18 @@
             const exportToCSV = () => {
                 if (incidencies.length === 0) return;
                 const headers = ["Data", "Docent", "Ubicació", "Tipus", "Prioritat", "Estat", "Descripció"];
-                const rows = incidencies.map(item => [
-                    item.createdAt?.toDate().toLocaleDateString('ca-ES') || '',
-                    `"${item.docent || 'Anònim'}"`,
-                    `"${item.aula}"`,
-                    item.tipus,
-                    item.prioritat,
-                    item.status,
-                    `"${item.descripcio.replace(/"/g, '""')}"`
-                ]);
+                const rows = incidencies.map(item => {
+                    const dateStr = item.createdAt?.toDate ? item.createdAt.toDate().toLocaleDateString('ca-ES') : new Date(item.createdAt).toLocaleDateString('ca-ES');
+                    return [
+                        dateStr,
+                        `"${item.docent || 'Anònim'}"`,
+                        `"${item.aula}"`,
+                        item.tipus,
+                        item.prioritat,
+                        item.status,
+                        `"${item.descripcio.replace(/"/g, '""')}"`
+                    ];
+                });
                 const csvContent = "\ufeff" + [headers, ...rows].map(e => e.join(",")).join("\n");
                 const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
                 const url = URL.createObjectURL(blob);
@@ -222,27 +285,58 @@
 
             const handleSubmit = async (e) => {
                 e.preventDefault();
-                if (!descripcio || !aula || !docent || !user) return;
+                if (!descripcio || !aula || !docent) return;
                 setIsSubmitting(true);
-                try {
-                    await window.fb.addDoc(window.fb.collection(window.fb.db, 'artifacts', window.fb.appId, 'public', 'data', 'incidencies'), {
-                        docent, descripcio, aula, prioritat, tipus, image: imageData,
-                        status: 'pendent', userId: user.uid, createdAt: window.fb.Timestamp.now()
-                    });
-                    setDescripcio(''); setAula(''); setDocent(''); setImageData(null);
-                    setView('list');
-                } catch (err) { console.error(err); }
-                finally { setIsSubmitting(false); }
+                
+                const novaIncidencia = {
+                    docent,
+                    descripcio,
+                    aula,
+                    prioritat,
+                    tipus,
+                    image: imageData,
+                    status: 'pendent',
+                    createdAt: isFirebase ? window.fb.Timestamp.now() : new Date().toISOString()
+                };
+
+                if (isFirebase) {
+                    try {
+                        await window.fb.addDoc(window.fb.collection(window.fb.db, 'artifacts', window.fb.appId, 'public', 'data', 'incidencies'), {
+                            ...novaIncidencia,
+                            userId: window.fb.auth.currentUser.uid
+                        });
+                    } catch (err) { 
+                        console.error(err); 
+                    }
+                } else {
+                    const idTemp = 'local_' + Date.now();
+                    const updatedList = [{ id: idTemp, ...novaIncidencia }, ...incidencies];
+                    saveLocalData(updatedList);
+                }
+
+                setDescripcio(''); setAula(''); setDocent(''); setImageData(null);
+                setView('list');
+                setIsSubmitting(false);
             };
 
             const toggleStatus = async (id, currentStatus) => {
                 const newStatus = currentStatus === 'pendent' ? 'resolta' : 'pendent';
-                await window.fb.updateDoc(window.fb.doc(window.fb.db, 'artifacts', window.fb.appId, 'public', 'data', 'incidencies', id), { status: newStatus });
+                if (isFirebase) {
+                    await window.fb.updateDoc(window.fb.doc(window.fb.db, 'artifacts', window.fb.appId, 'public', 'data', 'incidencies', id), { status: newStatus });
+                } else {
+                    const updated = incidencies.map(item => item.id === id ? { ...item, status: newStatus } : item);
+                    saveLocalData(updated);
+                }
             };
 
             const deleteIncidencia = async (id) => {
                 if (window.confirm('Estàs segur que vols eliminar aquesta incidència?')) {
-                    await window.fb.deleteDoc(window.fb.doc(window.fb.db, 'artifacts', window.fb.appId, 'public', 'data', 'incidencies', id));
+                    if (isFirebase) {
+                        await window.fb.deleteDoc(window.fb.doc(window.fb.db, 'artifacts', window.fb.appId, 'public', 'data', 'incidencies', id));
+                    } else {
+                        const updated = incidencies.filter(item => item.id !== id);
+                        saveLocalData(updated);
+                    }
                 }
             };
 
@@ -263,7 +357,10 @@
                             <div className="bg-white/20 p-2 rounded-lg">
                                 <Icon name="Settings" size={24} className="text-white" />
                             </div>
-                            <h1 className="text-xl font-black tracking-tight uppercase">Incidències TAC</h1>
+                            <div>
+                                <h1 className="text-xl font-black tracking-tight uppercase leading-none">Incidències TAC</h1>
+                                <span className="text-[9px] font-bold opacity-60 uppercase">{isFirebase ? 'Mode Online' : 'Emmagatzematge Local'}</span>
+                            </div>
                         </div>
                         <button onClick={exportToCSV} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 shadow-inner">
                             <Icon name="Download" size={16} /> EXPORTAR
@@ -340,7 +437,7 @@
                                         <div className="mt-5 flex justify-between items-center border-t border-slate-100 pt-4">
                                             <div className="flex items-center gap-2 text-[10px] text-slate-400 font-black uppercase tracking-tighter">
                                                 <Icon name="Calendar" size={14} />
-                                                {item.createdAt?.toDate().toLocaleDateString('ca-ES')}
+                                                {item.createdAt?.toDate ? item.createdAt.toDate().toLocaleDateString('ca-ES') : new Date(item.createdAt).toLocaleDateString('ca-ES')}
                                             </div>
                                             <div className="flex gap-3">
                                                 <button onClick={() => toggleStatus(item.id, item.status)} className={`p-3 rounded-xl transition-all shadow-sm ${item.status === 'resolta' ? 'bg-slate-200 text-slate-500' : 'bg-green-500 text-white hover:bg-green-600 active:scale-90'}`}>
