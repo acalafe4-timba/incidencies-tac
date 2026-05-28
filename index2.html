@@ -4,37 +4,45 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gestor d'Incidències TAC - Escola</title>
-    <!-- Biblioteques externes -->
+    
+    <!-- Biblioteques externes síncrones (Garanteix que no hi hagi pantalles blanques) -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     
-    <!-- Configuració de Firebase -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot, query, updateDoc, doc, deleteDoc, Timestamp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+    <!-- Firebase Clàssic (Compat) - Es carrega de forma immediata i síncrona -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 
-        const firebaseConfig = JSON.parse(window.__firebase_config || '{}');
-        const appId = window.__app_id || 'escola-tac-manager';
-        const initialToken = window.__initial_auth_token;
-
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-
-        // Exportació de Firebase al context global per a React
-        window.fb = { 
-            auth, db, appId, addDoc, collection, onSnapshot, query, 
-            updateDoc, doc, deleteDoc, Timestamp, onAuthStateChanged, 
-            signInAnonymously, signInWithCustomToken, initialToken 
-        };
+    <script>
+        // Inicialització global de la base de dades
+        window.fb = { active: false };
+        
+        try {
+            let firebaseConfig = null;
+            if (window.__firebase_config) {
+                firebaseConfig = JSON.parse(window.__firebase_config);
+            }
+            
+            if (firebaseConfig && firebaseConfig.apiKey) {
+                firebase.initializeApp(firebaseConfig);
+                window.fb = {
+                    active: true,
+                    auth: firebase.auth(),
+                    db: firebase.firestore(),
+                    appId: window.__app_id || 'escola-tac-manager'
+                };
+            }
+        } catch (e) {
+            console.warn("Corrent en mode d'emmagatzematge local.");
+        }
     </script>
 
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap');
         body { 
             font-family: 'Inter', sans-serif; 
             -webkit-tap-highlight-color: transparent;
@@ -58,10 +66,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        /**
-         * Component d'Icona que utilitza Lucide.
-         * Requereix cridar lucide.createIcons() després de cada renderitzat.
-         */
+        // Component segur d'icones Lucide
         const Icon = ({ name, size = 24, className = "" }) => (
             <i 
                 data-lucide={name.toLowerCase().replace(/([a-z0-9])([A-Z])/g, '$1-$2')} 
@@ -71,13 +76,12 @@
         );
 
         function App() {
-            // Estats de l'aplicació
-            const [user, setUser] = useState(null);
+            const [isFirebase, setIsFirebase] = useState(false);
             const [incidencies, setIncidencies] = useState([]);
             const [view, setView] = useState('list');
             const [loading, setLoading] = useState(true);
             
-            // Estats del formulari
+            // Formulari
             const [docent, setDocent] = useState('');
             const [descripcio, setDescripcio] = useState('');
             const [aula, setAula] = useState('');
@@ -85,117 +89,128 @@
             const [tipus, setTipus] = useState('Hardware');
             const [imageData, setImageData] = useState(null);
             const [isSubmitting, setIsSubmitting] = useState(false);
-            
-            // Estats de la Intel·ligència Artificial (Gemini)
-            const [isAiLoading, setIsAiLoading] = useState(false);
-            const [aiSuggestion, setAiSuggestion] = useState({ id: null, text: '' });
+
+            // Estat de la finestra emergent personalitzada (Modal)
+            const [modal, setModal] = useState({
+                isOpen: false,
+                title: '',
+                message: '',
+                confirmText: 'Confirmar',
+                cancelText: 'Cancel·lar',
+                showCancel: true,
+                onConfirm: null
+            });
 
             const fileInputRef = useRef(null);
 
-            // Refrescar icones de Lucide quan el DOM canvia
+            // Tancar modal
+            const closeModal = () => {
+                setModal(prev => ({ ...prev, isOpen: false }));
+            };
+
+            // Forçar renderitzat d'icones Lucide
             useEffect(() => {
                 if (window.lucide) window.lucide.createIcons();
             });
 
-            // Inicialització de l'autenticació
+            // Lògica de connexió de dades segura
             useEffect(() => {
-                const initAuth = async () => {
-                    if (!window.fb) return;
-                    try {
-                        if (window.fb.initialToken) {
-                            await window.fb.signInWithCustomToken(window.fb.auth, window.fb.initialToken);
-                        } else {
-                            await window.fb.signInAnonymously(window.fb.auth);
-                        }
-                    } catch (err) { console.error("Auth error:", err); }
-                };
-                initAuth();
-                const unsubscribe = window.fb.onAuthStateChanged(window.fb.auth, (u) => {
-                    setUser(u);
-                    if (u) setLoading(false);
-                });
-                return () => unsubscribe();
+                if (window.fb && window.fb.active) {
+                    setIsFirebase(true);
+                    
+                    // Autenticació anònima immediata
+                    window.fb.auth.signInAnonymously()
+                        .then((userCredential) => {
+                            const user = userCredential.user;
+                            
+                            // Escolta en temps real de Firestore
+                            const ref = window.fb.db.collection('artifacts')
+                                .doc(window.fb.appId)
+                                .collection('public')
+                                .doc('data')
+                                .collection('incidencies');
+                                
+                            return ref.onSnapshot((snapshot) => {
+                                const data = [];
+                                snapshot.forEach((doc) => {
+                                    data.push({ id: doc.id, ...doc.data() });
+                                });
+                                // Ordenar per data de creació
+                                data.sort((a, b) => {
+                                    const dateA = a.createdAt?.seconds || 0;
+                                    const dateB = b.createdAt?.seconds || 0;
+                                    return dateB - dateA;
+                                });
+                                setIncidencies(data);
+                                setLoading(false);
+                            }, (error) => {
+                                console.error("Error Firestore, canviant a local:", error);
+                                setupLocalStorageFallback();
+                            });
+                        })
+                        .catch((err) => {
+                            console.error("Error Auth, canviant a local:", err);
+                            setupLocalStorageFallback();
+                        });
+                } else {
+                    setupLocalStorageFallback();
+                }
             }, []);
 
-            // Subscripció a les dades de Firestore
-            useEffect(() => {
-                if (!user || !window.fb) return;
-                const q = window.fb.collection(window.fb.db, 'artifacts', window.fb.appId, 'public', 'data', 'incidencies');
-                const unsubscribe = window.fb.onSnapshot(q, (snapshot) => {
-                    const data = snapshot.docs.map(doc => ({
-                        id: doc.id,
-                        ...doc.data()
-                    })).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-                    setIncidencies(data);
-                }, (error) => console.error("Error al carregar dades:", error));
-                return () => unsubscribe();
-            }, [user]);
-
-            /**
-             * Funció genèrica per cridar a l'API de Gemini amb backoff exponencial
-             */
-            const callGemini = async (prompt, systemInstruction) => {
-                const apiKey = ""; // La clau s'injecta automàticament a l'entorn de l'app
-                let retries = 0;
-                const maxRetries = 5;
-                
-                while (retries < maxRetries) {
-                    try {
-                        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                contents: [{ parts: [{ text: prompt }] }],
-                                systemInstruction: { parts: [{ text: systemInstruction }] }
-                            })
-                        });
-                        const result = await response.json();
-                        return result.candidates?.[0]?.content?.parts?.[0]?.text;
-                    } catch (err) {
-                        retries++;
-                        await new Promise(r => setTimeout(r, Math.pow(2, retries) * 1000));
+            const setupLocalStorageFallback = () => {
+                setIsFirebase(false);
+                try {
+                    const localData = localStorage.getItem('escola_incidencies');
+                    if (localData) {
+                        setIncidencies(JSON.parse(localData));
                     }
+                } catch (e) {
+                    console.error("Error llegint LocalStorage", e);
                 }
-                throw new Error("No s'ha pogut connectar amb la IA després de diversos intents.");
+                setLoading(false);
             };
 
-            /**
-             * Utilitza Gemini per millorar la redacció de la incidència
-             */
-            const refineDescription = async () => {
-                if (!descripcio || descripcio.length < 5) return;
-                setIsAiLoading(true);
+            const saveLocalData = (newData) => {
+                setIncidencies(newData);
                 try {
-                    const systemPrompt = "Ets un expert en suport informàtic escolar. Millora les notes de l'usuari i converteix-les en una descripció tècnica clara i professional en català. Sigues breu i directe.";
-                    const refined = await callGemini(`Millora aquesta descripció d'incidència: ${descripcio}`, systemPrompt);
-                    if (refined) setDescripcio(refined.trim());
+                    localStorage.setItem('escola_incidencies', JSON.stringify(newData));
                 } catch (e) {
-                    console.error("AI Error:", e);
-                } finally {
-                    setIsAiLoading(false);
-                }
-            };
-
-            /**
-             * Genera una possible solució ràpida per a una incidència existent
-             */
-            const getSolutionSuggestion = async (incidencia) => {
-                setAiSuggestion({ id: incidencia.id, text: 'Analitzant el problema...' });
-                try {
-                    const systemPrompt = "Ets un coordinador TAC. Proposa 3 passos ràpids per intentar solucionar aquest problema abans que vingui el tècnic. Respon en català i de forma molt concisa.";
-                    const prompt = `Incidència: ${incidencia.descripcio}. Tipus: ${incidencia.tipus}. Aula: ${incidencia.aula}.`;
-                    const solution = await callGemini(prompt, systemPrompt);
-                    setAiSuggestion({ id: incidencia.id, text: solution });
-                } catch (e) {
-                    setAiSuggestion({ id: incidencia.id, text: 'No s\'ha pogut generar el suggeriment.' });
+                    console.error("Error desant a LocalStorage", e);
                 }
             };
 
             const handleImageCapture = (e) => {
                 const file = e.target.files[0];
                 if (file) {
+                    // Validació del límit de 5MB (5 * 1024 * 1024 bytes)
+                    if (file.size > 5 * 1024 * 1024) {
+                        setModal({
+                            isOpen: true,
+                            title: 'Fitxer massa gran ⚠️',
+                            message: 'La imatge seleccionada supera el límit de 5MB. Si us plau, puja una imatge més petita.',
+                            confirmText: 'D\'acord',
+                            showCancel: false,
+                            onConfirm: closeModal
+                        });
+                        return;
+                    }
+
                     const reader = new FileReader();
-                    reader.onloadend = () => setImageData(reader.result);
+                    reader.onloadend = () => {
+                        const img = new Image();
+                        img.src = reader.result;
+                        img.onload = () => {
+                            // Reduir la mida de la foto per a un emmagatzematge òptim
+                            const canvas = document.createElement('canvas');
+                            const MAX_WIDTH = 1024; // Augmentat a 1024px per a fotos de major qualitat
+                            const scaleSize = MAX_WIDTH / img.width;
+                            canvas.width = MAX_WIDTH;
+                            canvas.height = img.height * scaleSize;
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                            setImageData(canvas.toDataURL('image/jpeg', 0.7)); // Compressió òptima
+                        };
+                    };
                     reader.readAsDataURL(file);
                 }
             };
@@ -203,15 +218,23 @@
             const exportToCSV = () => {
                 if (incidencies.length === 0) return;
                 const headers = ["Data", "Docent", "Ubicació", "Tipus", "Prioritat", "Estat", "Descripció"];
-                const rows = incidencies.map(item => [
-                    item.createdAt?.toDate().toLocaleDateString('ca-ES') || '',
-                    `"${item.docent || 'Anònim'}"`,
-                    `"${item.aula}"`,
-                    item.tipus,
-                    item.prioritat,
-                    item.status,
-                    `"${item.descripcio.replace(/"/g, '""')}"`
-                ]);
+                const rows = incidencies.map(item => {
+                    let dateStr = '';
+                    if (item.createdAt) {
+                        if (item.createdAt.toDate) dateStr = item.createdAt.toDate().toLocaleDateString('ca-ES');
+                        else if (item.createdAt.seconds) dateStr = new Date(item.createdAt.seconds * 1000).toLocaleDateString('ca-ES');
+                        else dateStr = new Date(item.createdAt).toLocaleDateString('ca-ES');
+                    }
+                    return [
+                        dateStr,
+                        `"${item.docent || 'Anònim'}"`,
+                        `"${item.aula}"`,
+                        item.tipus,
+                        item.prioritat,
+                        item.status,
+                        `"${item.descripcio.replace(/"/g, '""')}"`
+                    ];
+                });
                 const csvContent = "\ufeff" + [headers, ...rows].map(e => e.join(",")).join("\n");
                 const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
                 const url = URL.createObjectURL(blob);
@@ -223,48 +246,160 @@
 
             const handleSubmit = async (e) => {
                 e.preventDefault();
-                if (!descripcio || !aula || !docent || !user) return;
+                if (!descripcio || !aula || !docent) return;
                 setIsSubmitting(true);
-                try {
-                    await window.fb.addDoc(window.fb.collection(window.fb.db, 'artifacts', window.fb.appId, 'public', 'data', 'incidencies'), {
-                        docent, descripcio, aula, prioritat, tipus, image: imageData,
-                        status: 'pendent', userId: user.uid, createdAt: window.fb.Timestamp.now()
-                    });
-                    setDescripcio(''); setAula(''); setDocent(''); setImageData(null);
-                    setView('list');
-                } catch (err) { console.error(err); }
-                finally { setIsSubmitting(false); }
+                
+                const novaIncidencia = {
+                    docent,
+                    descripcio,
+                    aula,
+                    prioritat,
+                    tipus,
+                    image: imageData,
+                    status: 'pendent',
+                    createdAt: isFirebase ? firebase.firestore.Timestamp.now() : new Date().toISOString()
+                };
+
+                if (isFirebase) {
+                    try {
+                        const ref = window.fb.db.collection('artifacts')
+                            .doc(window.fb.appId)
+                            .collection('public')
+                            .doc('data')
+                            .collection('incidencies');
+                        await ref.add({
+                            ...novaIncidencia,
+                            userId: window.fb.auth.currentUser?.uid || 'anonymous'
+                        });
+                    } catch (err) { 
+                        console.error("Error desant a Firebase:", err); 
+                    }
+                } else {
+                    const idTemp = 'local_' + Date.now();
+                    const updatedList = [{ id: idTemp, ...novaIncidencia }, ...incidencies];
+                    saveLocalData(updatedList);
+                }
+
+                setDescripcio(''); setAula(''); setDocent(''); setImageData(null);
+                setView('list');
+                setIsSubmitting(false);
+            };
+
+            // Acció d'execució d'eliminació real
+            const executeDelete = async (id) => {
+                if (isFirebase) {
+                    try {
+                        const ref = window.fb.db.collection('artifacts')
+                            .doc(window.fb.appId)
+                            .collection('public')
+                            .doc('data')
+                            .collection('incidencies')
+                            .doc(id);
+                        await ref.delete();
+                    } catch (e) {
+                        console.error("Error al esborrar de Firebase:", e);
+                    }
+                } else {
+                    const updated = incidencies.filter(item => item.id !== id);
+                    saveLocalData(updated);
+                }
             };
 
             const toggleStatus = async (id, currentStatus) => {
                 const newStatus = currentStatus === 'pendent' ? 'resolta' : 'pendent';
-                await window.fb.updateDoc(window.fb.doc(window.fb.db, 'artifacts', window.fb.appId, 'public', 'data', 'incidencies', id), { status: newStatus });
+                
+                if (isFirebase) {
+                    const ref = window.fb.db.collection('artifacts')
+                        .doc(window.fb.appId)
+                        .collection('public')
+                        .doc('data')
+                        .collection('incidencies')
+                        .doc(id);
+                    await ref.update({ status: newStatus });
+                } else {
+                    const updated = incidencies.map(item => item.id === id ? { ...item, status: newStatus } : item);
+                    saveLocalData(updated);
+                }
+
+                // Si es marca com a resolta, demana a l'usuari si vol esborrar-la completament
+                if (newStatus === 'resolta') {
+                    setModal({
+                        isOpen: true,
+                        title: 'Incidència Resolta! 🎉',
+                        message: 'Vols eliminar per complet aquesta incidència del llistat ara que s\'ha marcat com a resolta?',
+                        confirmText: 'Sí, eliminar',
+                        cancelText: 'No, conservar',
+                        showCancel: true,
+                        onConfirm: () => {
+                            executeDelete(id);
+                            closeModal();
+                        }
+                    });
+                }
             };
 
-            const deleteIncidencia = async (id) => {
-                if (window.confirm('Estàs segur que vols eliminar aquesta incidència?')) {
-                    await window.fb.deleteDoc(window.fb.doc(window.fb.db, 'artifacts', window.fb.appId, 'public', 'data', 'incidencies', id));
-                }
+            const handleDeleteClick = (id) => {
+                setModal({
+                    isOpen: true,
+                    title: 'Eliminar incidència 🗑️',
+                    message: 'Estàs segur que vols eliminar definitivament aquesta incidència? Aquesta acció no es pot desfer.',
+                    confirmText: 'Eliminar',
+                    cancelText: 'Cancel·lar',
+                    showCancel: true,
+                    onConfirm: () => {
+                        executeDelete(id);
+                        closeModal();
+                    }
+                });
             };
 
             if (loading) return (
                 <div className="flex h-screen items-center justify-center bg-slate-50">
                     <div className="flex flex-col items-center gap-4 text-center">
                         <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                        <p className="text-slate-500 font-semibold uppercase tracking-wider">Iniciant Gestor TAC...</p>
+                        <p className="text-slate-500 font-semibold uppercase tracking-wider text-xs">Arrencant Gestor TAC...</p>
                     </div>
                 </div>
             );
 
             return (
                 <div className="min-h-screen pb-24 max-w-2xl mx-auto bg-white shadow-2xl relative">
+                    {/* Finestra emergent d'interacció segura (Modal) */}
+                    {modal.isOpen && (
+                        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+                            <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl border border-slate-100 animate-in zoom-in-95 duration-200">
+                                <h3 className="text-lg font-black text-slate-900 mb-2">{modal.title}</h3>
+                                <p className="text-slate-600 text-sm mb-6 leading-relaxed">{modal.message}</p>
+                                <div className="flex gap-3 justify-end">
+                                    {modal.showCancel && (
+                                        <button 
+                                            onClick={closeModal} 
+                                            className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 transition-colors"
+                                        >
+                                            {modal.cancelText}
+                                        </button>
+                                    )}
+                                    <button 
+                                        onClick={modal.onConfirm} 
+                                        className="px-5 py-2.5 rounded-xl text-xs font-black text-white bg-blue-600 hover:bg-blue-700 transition-colors shadow-md shadow-blue-100"
+                                    >
+                                        {modal.confirmText}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Capçalera */}
                     <header className="bg-blue-700 text-white p-5 sticky top-0 z-20 shadow-lg flex justify-between items-center">
                         <div className="flex items-center gap-3">
                             <div className="bg-white/20 p-2 rounded-lg">
                                 <Icon name="Settings" size={24} className="text-white" />
                             </div>
-                            <h1 className="text-xl font-black tracking-tight uppercase">Incidències TAC</h1>
+                            <div>
+                                <h1 className="text-xl font-black tracking-tight uppercase leading-none">Incidències TAC</h1>
+                                <span className="text-[9px] font-bold opacity-60 uppercase tracking-wider">{isFirebase ? 'Sincronitzat Online' : 'Desat al dispositiu (Local)'}</span>
+                            </div>
                         </div>
                         <button onClick={exportToCSV} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 shadow-inner">
                             <Icon name="Download" size={16} /> EXPORTAR
@@ -287,9 +422,9 @@
                                 {incidencies.length === 0 ? (
                                     <div className="py-24 text-center flex flex-col items-center gap-6">
                                         <div className="bg-slate-100 p-8 rounded-full">
-                                            <Icon name="SearchX" size={48} className="text-slate-300" />
+                                            <Icon name="Search" size={48} className="text-slate-300" />
                                         </div>
-                                        <p className="text-slate-400 font-bold uppercase text-sm tracking-widest">Tot en ordre per ara</p>
+                                        <p className="text-slate-400 font-bold uppercase text-xs tracking-widest">Cap problema registrat</p>
                                     </div>
                                 ) : incidencies.map(item => (
                                     <div key={item.id} className={`bg-white rounded-2xl shadow-sm border border-slate-200 border-l-[6px] p-5 transition-all ${item.status === 'resolta' ? 'border-green-500 opacity-60 grayscale-[0.5]' : 'border-amber-500'}`}>
@@ -309,28 +444,6 @@
                                                     <span>{item.docent}</span>
                                                 </div>
                                                 <p className="text-slate-600 text-sm whitespace-pre-wrap leading-relaxed bg-slate-50 p-3 rounded-xl border border-slate-100">{item.descripcio}</p>
-                                                
-                                                {/* ✨ Secció IA Suggeriment */}
-                                                <div className="mt-4">
-                                                    {aiSuggestion.id === item.id ? (
-                                                        <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 text-xs text-indigo-900 animate-in relative overflow-hidden">
-                                                            <div className="absolute top-0 right-0 p-2 opacity-10">
-                                                                <Icon name="Sparkles" size={40} />
-                                                            </div>
-                                                            <div className="font-black flex items-center gap-2 mb-2 text-indigo-700 uppercase tracking-tighter">
-                                                                <Icon name="Sparkles" size={14} /> Suggeriment IA
-                                                            </div>
-                                                            <p className="whitespace-pre-wrap font-medium leading-relaxed">{aiSuggestion.text}</p>
-                                                        </div>
-                                                    ) : (
-                                                        <button 
-                                                            onClick={() => getSolutionSuggestion(item)}
-                                                            className="text-[10px] font-black text-white bg-indigo-600 px-4 py-2 rounded-xl hover:bg-indigo-700 transition-all flex items-center gap-2 shadow-md active:scale-95"
-                                                        >
-                                                            <Icon name="Zap" size={12} /> QUÈ PUC PROVAR? ✨
-                                                        </button>
-                                                    )}
-                                                </div>
                                             </div>
                                             {item.image && (
                                                 <div className="shrink-0">
@@ -341,13 +454,13 @@
                                         <div className="mt-5 flex justify-between items-center border-t border-slate-100 pt-4">
                                             <div className="flex items-center gap-2 text-[10px] text-slate-400 font-black uppercase tracking-tighter">
                                                 <Icon name="Calendar" size={14} />
-                                                {item.createdAt?.toDate().toLocaleDateString('ca-ES')}
+                                                {item.createdAt?.toDate ? item.createdAt.toDate().toLocaleDateString('ca-ES') : new Date(item.createdAt).toLocaleDateString('ca-ES')}
                                             </div>
                                             <div className="flex gap-3">
                                                 <button onClick={() => toggleStatus(item.id, item.status)} className={`p-3 rounded-xl transition-all shadow-sm ${item.status === 'resolta' ? 'bg-slate-200 text-slate-500' : 'bg-green-500 text-white hover:bg-green-600 active:scale-90'}`}>
                                                     <Icon name="Check" size={20}/>
                                                 </button>
-                                                <button onClick={() => deleteIncidencia(item.id)} className="p-3 bg-red-100 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all shadow-sm active:scale-90">
+                                                <button onClick={() => handleDeleteClick(item.id)} className="p-3 bg-red-100 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all shadow-sm active:scale-90">
                                                     <Icon name="Trash" size={20}/>
                                                 </button>
                                             </div>
@@ -392,28 +505,16 @@
                                     </div>
 
                                     <div className="space-y-2">
-                                        <div className="flex justify-between items-center px-2">
-                                            <label className="text-xs font-black text-slate-500 uppercase tracking-widest">Què no funciona?</label>
-                                            <button 
-                                                type="button"
-                                                onClick={refineDescription}
-                                                disabled={isAiLoading || !descripcio}
-                                                className={`text-[10px] font-black px-4 py-2 rounded-xl flex items-center gap-2 transition-all shadow-sm ${isAiLoading ? 'bg-slate-200 text-slate-400' : 'bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95'}`}
-                                            >
-                                                {isAiLoading ? <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : <Icon name="MagicWand" size={12} />}
-                                                IA: MILLORA EL TEXT ✨
-                                            </button>
-                                        </div>
-                                        <textarea value={descripcio} onChange={e => setDescripcio(e.target.value)} placeholder="Descripció breu o paraules clau..." className="w-full p-4 rounded-3xl bg-white border border-slate-200 h-32 outline-none focus:ring-4 focus:ring-blue-100 transition-all font-medium resize-none" required />
+                                        <label className="text-xs font-black text-slate-500 uppercase tracking-widest ml-2">Què no funciona?</label>
+                                        <textarea value={descripcio} onChange={e => setDescripcio(e.target.value)} placeholder="Explica detalladament el problema de l'equip..." className="w-full p-4 rounded-3xl bg-white border border-slate-200 h-32 outline-none focus:ring-4 focus:ring-blue-100 transition-all font-medium resize-none" required />
                                     </div>
                                     
                                     <div className="space-y-2">
-                                        <label className="block text-xs font-black text-slate-500 uppercase tracking-widest ml-2">Suport visual</label>
+                                        <label className="block text-xs font-black text-slate-500 uppercase tracking-widest ml-2">Suport visual (màx 5MB)</label>
                                         <div onClick={() => fileInputRef.current.click()} className={`p-6 border-4 border-dashed rounded-[2.5rem] flex flex-col items-center gap-4 cursor-pointer transition-all ${imageData ? 'border-blue-500 bg-blue-50' : 'border-slate-300 bg-white hover:border-slate-400'}`}>
                                             {imageData ? (
                                                 <div className="relative w-full group">
                                                     <img src={imageData} className="h-48 w-full object-cover rounded-3xl shadow-xl border-4 border-white" />
-                                                    <div className="absolute inset-0 bg-blue-600/20 opacity-0 group-hover:opacity-100 flex items-center justify-center rounded-3xl transition-opacity text-white font-black uppercase text-xs">Canviar imatge</div>
                                                 </div>
                                             ) : (
                                                 <>
@@ -435,7 +536,7 @@
                         )}
                     </main>
 
-                    {/* Navbar inferior flotant */}
+                    {/* Navbar inferior */}
                     <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-sm bg-slate-900/90 backdrop-blur-xl border border-white/10 p-4 flex justify-around items-center shadow-2xl rounded-[2.5rem] z-30 transition-all">
                         <button onClick={() => setView('list')} className={`flex flex-col items-center gap-1 transition-all ${view === 'list' ? 'text-blue-400 scale-125' : 'text-slate-500 hover:text-slate-300'}`}>
                             <Icon name="LayoutGrid" size={24}/><span className="text-[8px] font-black tracking-widest uppercase">Llistat</span>
@@ -446,7 +547,7 @@
                         </button>
 
                         <button disabled className="flex flex-col items-center gap-1 text-slate-700 cursor-not-allowed opacity-50">
-                            <Icon name="MessageSquare" size={24}/><span className="text-[8px] font-black tracking-widest uppercase">Xat IA</span>
+                            <Icon name="MessageSquare" size={24}/><span className="text-[8px] font-black tracking-widest uppercase">Incidència</span>
                         </button>
                     </nav>
                 </div>
