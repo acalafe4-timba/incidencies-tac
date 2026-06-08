@@ -19,34 +19,41 @@
 
     <script>
         // =========================================================================
-        // CONFIGURACIÓ DE LA TEVA BASE DE DADES DE L'ESCOLA (FIREBASE)
-        // =========================================================================
-        // Per sincronitzar tots els dispositius en temps real de forma 100% gratuïta:
-        // 1. Entra a https://console.firebase.google.com/ i crea un projecte nou (Ex: "TAC Escola").
-        // 2. Afegeix una aplicació web ("Web app") i copia aquí les teves claus de configuració.
-        // 3. Activa "Anonymous Auth" a la pestanya Authentication.
-        // 4. Crea una base de dades "Cloud Firestore" en mode de prova.
+        // OPCIÓ 1: CONFIGURACIÓ PER CODI (Opcional - Pots deixar-ho en blanc)
         // =========================================================================
         const la_meva_configuracio_firebase = {
-            apiKey: ""AIzaSyCtLndvI56k128CvC5FcWBLAKqA4aLLDl8"",
-            authDomain: "incidenciestactimba.firebaseapp.com",
-            projectId: "incidenciestactimba",
-            storageBucket: "incidenciestactimba.firebasestorage.app",
-            messagingSenderId: "510760542993",
-            appId: "1:510760542993:web:56e0ed4dbe406b45cae2b0"
+            apiKey: "EL_TEU_API_KEY",
+            authDomain: "EL_TEU_AUTH_DOMAIN",
+            projectId: "EL_TEU_PROJECT_ID",
+            storageBucket: "EL_TEU_STORAGE_BUCKET",
+            messagingSenderId: "EL_TEU_MESSAGING_SENDER_ID",
+            appId: "EL_TEU_APP_ID"
         };
         // =========================================================================
 
-        window.fb = { active: false };
+        window.fb = { active: false, error: null, usingLocalSettings: false };
         
         try {
             let firebaseConfig = null;
             
-            // Si has configurat les teves claus, les utilitzem
-            if (la_meva_configuracio_firebase.apiKey !== "EL_TEU_API_KEY") {
+            // 1. Mirem si l'usuari té una configuració guardada al navegador (OPCIÓ MÉS FÀCIL I ÀGIL)
+            const savedConfig = localStorage.getItem('escola_firebase_config');
+            if (savedConfig) {
+                try {
+                    firebaseConfig = JSON.parse(savedConfig);
+                    window.fb.usingLocalSettings = true;
+                } catch (e) {
+                    console.error("Configuració guardada invàlida");
+                }
+            }
+            
+            // 2. Si no, mirem si s'ha configurat per codi fix a dalt
+            if (!firebaseConfig && la_meva_configuracio_firebase.apiKey && la_meva_configuracio_firebase.apiKey !== "EL_TEU_API_KEY") {
                 firebaseConfig = la_meva_configuracio_firebase;
-            } else if (window.__firebase_config) {
-                // Alternativa automàtica per a l'entorn de desenvolupament de Canvas
+            } 
+            
+            // 3. Si no, usem la configuració automàtica de la plataforma de proves
+            if (!firebaseConfig && window.__firebase_config) {
                 firebaseConfig = JSON.parse(window.__firebase_config);
             }
             
@@ -56,12 +63,16 @@
                     active: true,
                     auth: firebase.auth(),
                     db: firebase.firestore(),
-                    appId: window.__app_id || 'escola-tac-manager',
-                    initialToken: window.__initial_auth_token
+                    appId: window.__app_id || 'escola-tac-manager-escola',
+                    error: null,
+                    usingLocalSettings: window.fb.usingLocalSettings
                 };
+            } else {
+                window.fb.error = "Sense connexió al núvol. L'aplicació està utilitzant memòria local de seguretat.";
             }
         } catch (e) {
-            console.warn("Corrent en mode d'emmagatzematge local per defecte.");
+            console.error("Error d'inicialització:", e);
+            window.fb.error = e.message || "Error al connectar amb la base de dades.";
         }
     </script>
 
@@ -105,6 +116,7 @@
             const [incidencies, setIncidencies] = useState([]);
             const [view, setView] = useState('list');
             const [loading, setLoading] = useState(true);
+            const [dbErrorMsg, setDbErrorMsg] = useState(null);
             
             // Formulari
             const [docent, setDocent] = useState('');
@@ -115,7 +127,11 @@
             const [imageData, setImageData] = useState(null);
             const [isSubmitting, setIsSubmitting] = useState(false);
 
-            // Estat de la finestra emergent personalitzada (Modal)
+            // Estat de la finestra de configuració de Firebase
+            const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+            const [rawFirebaseJson, setRawFirebaseJson] = useState('');
+
+            // Estat del Modal personalitzat
             const [modal, setModal] = useState({
                 isOpen: false,
                 title: '',
@@ -145,20 +161,16 @@
                     
                     const initAuth = async () => {
                         try {
-                            if (window.fb.initialToken) {
-                                await window.fb.auth.signInWithCustomToken(window.fb.initialToken);
-                            } else {
-                                await window.fb.auth.signInAnonymously();
-                            }
+                            await window.fb.auth.signInAnonymously();
                         } catch (err) {
-                            console.error("Error d'autenticació, passant a local:", err);
+                            console.error("Error d'autenticació Firebase:", err);
+                            setDbErrorMsg("Error d'autenticació. Comprova que l'accés Anònim estigui habilitat.");
                             setupLocalStorageFallback();
                         }
                     };
 
                     initAuth();
 
-                    // Escoltar canvis d'estat d'autenticació
                     const unsubscribeAuth = window.fb.auth.onAuthStateChanged((u) => {
                         if (u) {
                             setUser(u);
@@ -169,6 +181,9 @@
 
                     return () => unsubscribeAuth();
                 } else {
+                    if (window.fb && window.fb.error) {
+                        setDbErrorMsg(window.fb.error);
+                    }
                     setupLocalStorageFallback();
                 }
             }, []);
@@ -193,7 +208,7 @@
                         data.push({ id: doc.id, ...doc.data() });
                     });
                     
-                    // Ordenació manual a memòria JS
+                    // Ordenació manual per seguretat a la memòria
                     data.sort((a, b) => {
                         const dateA = a.createdAt?.seconds || 0;
                         const dateB = b.createdAt?.seconds || 0;
@@ -202,8 +217,10 @@
                     
                     setIncidencies(data);
                     setLoading(false);
+                    setDbErrorMsg(null); 
                 }, (error) => {
-                    console.error("Error carregant Firebase onSnapshot, passant a local:", error);
+                    console.error("Error Firestore onSnapshot:", error);
+                    setDbErrorMsg("No es pot connectar a la base de dades. Comprova les regles de Firestore de la consola.");
                     setupLocalStorageFallback();
                 });
 
@@ -235,12 +252,12 @@
             const handleImageCapture = (e) => {
                 const file = e.target.files[0];
                 if (file) {
-                    // Validació del límit de 5MB (5 * 1024 * 1024 bytes)
+                    // Validació estricta de 5MB (5 * 1024 * 1024 bytes)
                     if (file.size > 5 * 1024 * 1024) {
                         setModal({
                             isOpen: true,
                             title: 'Fitxer massa gran ⚠️',
-                            message: 'La imatge seleccionada supera el límit de 5MB. Si us plau, puja una imatge més petita.',
+                            message: 'La imatge seleccionada supera el límit de 5MB permesa pels docents. Si us plau, puja una imatge de menor pes.',
                             confirmText: 'D\'acord',
                             showCancel: false,
                             onConfirm: closeModal
@@ -253,15 +270,15 @@
                         const img = new Image();
                         img.src = reader.result;
                         img.onload = () => {
-                            // Reduir la mida de la foto per a un emmagatzematge òptim
+                            // Compressió d'alta definició de la foto
                             const canvas = document.createElement('canvas');
-                            const MAX_WIDTH = 1024;
+                            const MAX_WIDTH = 1200; // Major resolució ara que el límit de fitxer és 5MB
                             const scaleSize = MAX_WIDTH / img.width;
                             canvas.width = MAX_WIDTH;
                             canvas.height = img.height * scaleSize;
                             const ctx = canvas.getContext('2d');
                             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                            setImageData(canvas.toDataURL('image/jpeg', 0.7)); // Compressió òptima
+                            setImageData(canvas.toDataURL('image/jpeg', 0.8)); 
                         };
                     };
                     reader.readAsDataURL(file);
@@ -374,12 +391,12 @@
                     saveLocalData(updated);
                 }
 
-                // Si es marca com a resolta, demana a l'usuari si vol esborrar-la completament
+                // Si es marca com a resolta, demana a l'usuari si vol esborrar-la completament (Nou canvi sol·licitat!)
                 if (newStatus === 'resolta') {
                     setModal({
                         isOpen: true,
                         title: 'Incidència Resolta! 🎉',
-                        message: 'Vols eliminar per complet aquesta incidència del llistat ara que s\'ha marcat com a resolta?',
+                        message: 'Vols eliminar definitivament aquesta incidència de la base de dades ara que s\'ha completat?',
                         confirmText: 'Sí, eliminar',
                         cancelText: 'No, conservar',
                         showCancel: true,
@@ -395,7 +412,7 @@
                 setModal({
                     isOpen: true,
                     title: 'Eliminar incidència 🗑️',
-                    message: 'Estàs segur que vols eliminar definitivament aquesta incidència? Aquesta acció no es pot desfer.',
+                    message: 'Estàs completament segur que vols eliminar aquesta incidència? Aquesta acció és irreversible.',
                     confirmText: 'Eliminar',
                     cancelText: 'Cancel·lar',
                     showCancel: true,
@@ -403,6 +420,50 @@
                         executeDelete(id);
                         closeModal();
                     }
+                });
+            };
+
+            // Desa la configuració que s'ha enganxat des de la interfície de l'App
+            const handleSaveSettings = (e) => {
+                e.preventDefault();
+                try {
+                    // Netegem el text de cometes si cal i comprovem si és un JSON vàlid
+                    const cleanJson = rawFirebaseJson.trim();
+                    const parsed = JSON.parse(cleanJson);
+                    if (parsed.apiKey) {
+                        localStorage.setItem('escola_firebase_config', JSON.stringify(parsed));
+                        setModal({
+                            isOpen: true,
+                            title: 'Núvol connectat! 🚀',
+                            message: 'S\'ha desat la configuració de Firebase correctament. L\'aplicació es reiniciarà per connectar-se.',
+                            confirmText: 'Reiniciar',
+                            showCancel: false,
+                            onConfirm: () => window.location.reload()
+                        });
+                    } else {
+                        throw new Error();
+                    }
+                } catch (err) {
+                    setModal({
+                        isOpen: true,
+                        title: 'Error de format ⚠️',
+                        message: 'Si us plau, assegura\'t d\'enganxar un format JSON de configuració de Firebase vàlid. Ex: { "apiKey": "..." }',
+                        confirmText: 'Entès',
+                        showCancel: false,
+                        onConfirm: closeModal
+                    });
+                }
+            };
+
+            const handleClearSettings = () => {
+                localStorage.removeItem('escola_firebase_config');
+                setModal({
+                    isOpen: true,
+                    title: 'Núvol desconnectat 🔌',
+                    message: 'S\'ha esborrat la configuració. Es reiniciarà en mode local.',
+                    confirmText: 'Entès',
+                    showCancel: false,
+                    onConfirm: () => window.location.reload()
                 });
             };
 
@@ -417,7 +478,22 @@
 
             return (
                 <div className="min-h-screen pb-24 max-w-2xl mx-auto bg-white shadow-2xl relative">
-                    {/* Finestra emergent d'interacció segura (Modal) */}
+                    
+                    {/* Alerta de mode de funcionament a dalt de tot */}
+                    {!isFirebase && (
+                        <div className="bg-amber-500 text-white p-3 text-xs font-bold text-center flex items-center justify-center gap-2 animate-in z-40 relative">
+                            <Icon name="WifiOff" size={14} />
+                            <span>Mode Local: Les dades només es guarden en aquest navegador.</span>
+                            <button 
+                                onClick={() => setIsSettingsOpen(true)}
+                                className="underline bg-white/20 px-2 py-0.5 rounded text-[10px]"
+                            >
+                                Activar Núvol
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Finestra emergent de seguretat (Modal per alertes/confirmacions) */}
                     {modal.isOpen && (
                         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
                             <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl border border-slate-100 animate-in zoom-in-95 duration-200">
@@ -443,6 +519,55 @@
                         </div>
                     )}
 
+                    {/* Finestra emergent per connectar a la base de dades (Configuració de Firebase en línia) */}
+                    {isSettingsOpen && (
+                        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-40 animate-in fade-in duration-200">
+                            <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-slate-100 animate-in zoom-in-95 duration-200">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                                        <Icon name="Settings" size={18} className="text-blue-600"/>
+                                        Configuració de Firebase
+                                    </h3>
+                                    <button onClick={() => setIsSettingsOpen(false)} className="text-slate-400 hover:text-slate-600">
+                                        <Icon name="X" size={18} />
+                                    </button>
+                                </div>
+                                <p className="text-xs text-slate-500 mb-4 leading-relaxed">
+                                    Enganxa el bloc de codi d'inicialització de Firebase (en format JSON) per poder desar les dades de forma unificada i rebre incidències en qualsevol ordinador i mòbil.
+                                </p>
+                                
+                                <form onSubmit={handleSaveSettings} className="space-y-4">
+                                    <textarea 
+                                        value={rawFirebaseJson}
+                                        onChange={(e) => setRawFirebaseJson(e.target.value)}
+                                        placeholder='Exemple:&#10;{&#10;  "apiKey": "AIzaSy...",&#10;  "authDomain": "tac-escola.firebaseapp.com",&#10;  "projectId": "tac-escola",&#10;  "storageBucket": "tac-escola.appspot.com",&#10;  "messagingSenderId": "123456",&#10;  "appId": "1:123456:web"&#10;}'
+                                        className="w-full h-40 p-3 bg-slate-50 rounded-2xl border border-slate-200 font-mono text-xs outline-none focus:ring-2 focus:ring-blue-500"
+                                        required
+                                    />
+                                    
+                                    <div className="flex gap-2 pt-2">
+                                        <button 
+                                            type="submit"
+                                            className="flex-1 p-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs shadow-md transition-colors"
+                                        >
+                                            Guardar i Conectar
+                                        </button>
+                                        
+                                        {localStorage.getItem('escola_firebase_config') && (
+                                            <button 
+                                                type="button"
+                                                onClick={handleClearSettings}
+                                                className="p-3 bg-red-50 text-red-600 hover:bg-red-100 font-bold rounded-xl text-xs transition-colors"
+                                            >
+                                                Desconectar Núvol
+                                            </button>
+                                        )}
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Capçalera */}
                     <header className="bg-blue-700 text-white p-5 sticky top-0 z-20 shadow-lg flex justify-between items-center">
                         <div className="flex items-center gap-3">
@@ -451,12 +576,23 @@
                             </div>
                             <div>
                                 <h1 className="text-xl font-black tracking-tight uppercase leading-none">Incidències TAC</h1>
-                                <span className="text-[9px] font-bold opacity-60 uppercase tracking-wider">{isFirebase ? 'Sincronitzat Online' : 'Desat al dispositiu (Local)'}</span>
+                                <span className="text-[9px] font-bold opacity-60 uppercase tracking-wider">
+                                    {isFirebase ? 'Sincronitzat Online' : 'Desat al dispositiu (Local)'}
+                                </span>
                             </div>
                         </div>
-                        <button onClick={exportToCSV} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 shadow-inner">
-                            <Icon name="Download" size={16} /> EXPORTAR
-                        </button>
+                        <div className="flex items-center gap-2">
+                            <button 
+                                onClick={() => setIsSettingsOpen(true)}
+                                className="p-2 bg-blue-600 hover:bg-blue-500 rounded-xl text-white transition-all active:scale-95 shadow-inner"
+                                title="Configuració de Firebase"
+                            >
+                                <Icon name="Sliders" size={16} />
+                            </button>
+                            <button onClick={exportToCSV} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 shadow-inner">
+                                <Icon name="Download" size={16} /> EXPORTAR
+                            </button>
+                        </div>
                     </header>
 
                     <main className="p-4">
