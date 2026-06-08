@@ -19,15 +19,15 @@
 
     <script>
         // =========================================================================
-        // OPCIÓ 1: CONFIGURACIÓ PER CODI (Opcional - Pots deixar-ho en blanc)
+        // CONFIGURACIÓ PREPARADA EN TEMPS REAL PER A LA TEVA ESCOLA 🚀
         // =========================================================================
         const la_meva_configuracio_firebase = {
-            apiKey: "EL_TEU_API_KEY",
-            authDomain: "EL_TEU_AUTH_DOMAIN",
-            projectId: "EL_TEU_PROJECT_ID",
-            storageBucket: "EL_TEU_STORAGE_BUCKET",
-            messagingSenderId: "EL_TEU_MESSAGING_SENDER_ID",
-            appId: "EL_TEU_APP_ID"
+            apiKey: "AIzaSyCtLndvI56k128CvC5FcWBLAKqA4aLLDl8",
+            authDomain: "incidenciestactimba.firebaseapp.com",
+            projectId: "incidenciestactimba",
+            storageBucket: "incidenciestactimba.firebasestorage.app",
+            messagingSenderId: "510760542993",
+            appId: "1:510760542993:web:56e0ed4dbe406b45cae2b0"
         };
         // =========================================================================
 
@@ -36,23 +36,23 @@
         try {
             let firebaseConfig = null;
             
-            // 1. Mirem si l'usuari té una configuració guardada al navegador (OPCIÓ MÉS FÀCIL I ÀGIL)
+            // 1. Mirem si l'usuari té una configuració personalitzada desada al navegador
             const savedConfig = localStorage.getItem('escola_firebase_config');
             if (savedConfig) {
                 try {
                     firebaseConfig = JSON.parse(savedConfig);
                     window.fb.usingLocalSettings = true;
                 } catch (e) {
-                    console.error("Configuració guardada invàlida");
+                    console.error("Configuració desada invàlida");
                 }
             }
             
-            // 2. Si no, mirem si s'ha configurat per codi fix a dalt
+            // 2. Si no, usem la configuració fixada a dalt que acabes d'enviar de Firebase
             if (!firebaseConfig && la_meva_configuracio_firebase.apiKey && la_meva_configuracio_firebase.apiKey !== "EL_TEU_API_KEY") {
                 firebaseConfig = la_meva_configuracio_firebase;
             } 
             
-            // 3. Si no, usem la configuració automàtica de la plataforma de proves
+            // 3. Si no, alternativa per a l'entorn de proves local
             if (!firebaseConfig && window.__firebase_config) {
                 firebaseConfig = JSON.parse(window.__firebase_config);
             }
@@ -195,7 +195,7 @@
                     return;
                 }
 
-                // Ruta absoluta estricta
+                // Ruta absoluta estricta a les dades públiques de la teva escola
                 const ref = window.fb.db.collection('artifacts')
                     .doc(window.fb.appId)
                     .collection('public')
@@ -220,7 +220,7 @@
                     setDbErrorMsg(null); 
                 }, (error) => {
                     console.error("Error Firestore onSnapshot:", error);
-                    setDbErrorMsg("No es pot connectar a la base de dades. Comprova les regles de Firestore de la consola.");
+                    setDbErrorMsg("No es pot connectar. Comprova que les regles de Firestore de la teva consola siguin públiques.");
                     setupLocalStorageFallback();
                 });
 
@@ -252,12 +252,12 @@
             const handleImageCapture = (e) => {
                 const file = e.target.files[0];
                 if (file) {
-                    // Validació estricta de 5MB (5 * 1024 * 1024 bytes)
+                    // Validació estricta de 5MB
                     if (file.size > 5 * 1024 * 1024) {
                         setModal({
                             isOpen: true,
                             title: 'Fitxer massa gran ⚠️',
-                            message: 'La imatge seleccionada supera el límit de 5MB permesa pels docents. Si us plau, puja una imatge de menor pes.',
+                            message: 'La imatge seleccionada supera el límit de 5MB permès. Puja una imatge amb menys pes.',
                             confirmText: 'D\'acord',
                             showCancel: false,
                             onConfirm: closeModal
@@ -270,9 +270,9 @@
                         const img = new Image();
                         img.src = reader.result;
                         img.onload = () => {
-                            // Compressió d'alta definició de la foto
+                            // Compressió d'alta definició de la foto conservant bona qualitat
                             const canvas = document.createElement('canvas');
-                            const MAX_WIDTH = 1200; // Major resolució ara que el límit de fitxer és 5MB
+                            const MAX_WIDTH = 1200; 
                             const scaleSize = MAX_WIDTH / img.width;
                             canvas.width = MAX_WIDTH;
                             canvas.height = img.height * scaleSize;
@@ -391,7 +391,7 @@
                     saveLocalData(updated);
                 }
 
-                // Si es marca com a resolta, demana a l'usuari si vol esborrar-la completament (Nou canvi sol·licitat!)
+                // Ofereix opció de purgar de la base de dades a l'instant en marcar com a resolt
                 if (newStatus === 'resolta') {
                     setModal({
                         isOpen: true,
@@ -423,11 +423,9 @@
                 });
             };
 
-            // Desa la configuració que s'ha enganxat des de la interfície de l'App
             const handleSaveSettings = (e) => {
                 e.preventDefault();
                 try {
-                    // Netegem el text de cometes si cal i comprovem si és un JSON vàlid
                     const cleanJson = rawFirebaseJson.trim();
                     const parsed = JSON.parse(cleanJson);
                     if (parsed.apiKey) {
@@ -460,7 +458,7 @@
                 setModal({
                     isOpen: true,
                     title: 'Núvol desconnectat 🔌',
-                    message: 'S\'ha esborrat la configuració. Es reiniciarà en mode local.',
+                    message: 'S\'ha esborrat la configuració de navegació. Es reiniciarà en mode local.',
                     confirmText: 'Entès',
                     showCancel: false,
                     onConfirm: () => window.location.reload()
@@ -479,17 +477,11 @@
             return (
                 <div className="min-h-screen pb-24 max-w-2xl mx-auto bg-white shadow-2xl relative">
                     
-                    {/* Alerta de mode de funcionament a dalt de tot */}
-                    {!isFirebase && (
-                        <div className="bg-amber-500 text-white p-3 text-xs font-bold text-center flex items-center justify-center gap-2 animate-in z-40 relative">
-                            <Icon name="WifiOff" size={14} />
-                            <span>Mode Local: Les dades només es guarden en aquest navegador.</span>
-                            <button 
-                                onClick={() => setIsSettingsOpen(true)}
-                                className="underline bg-white/20 px-2 py-0.5 rounded text-[10px]"
-                            >
-                                Activar Núvol
-                            </button>
+                    {/* Alerta si falla alguna cosa a Firebase */}
+                    {dbErrorMsg && (
+                        <div className="bg-red-500 text-white p-3 text-xs font-bold text-center flex items-center justify-center gap-2 animate-in z-40 relative">
+                            <Icon name="AlertTriangle" size={14} />
+                            <span>{dbErrorMsg}</span>
                         </div>
                     )}
 
@@ -519,7 +511,7 @@
                         </div>
                     )}
 
-                    {/* Finestra emergent per connectar a la base de dades (Configuració de Firebase en línia) */}
+                    {/* Finestra emergent de configuració manual */}
                     {isSettingsOpen && (
                         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-40 animate-in fade-in duration-200">
                             <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-slate-100 animate-in zoom-in-95 duration-200">
@@ -533,7 +525,7 @@
                                     </button>
                                 </div>
                                 <p className="text-xs text-slate-500 mb-4 leading-relaxed">
-                                    Enganxa el bloc de codi d'inicialització de Firebase (en format JSON) per poder desar les dades de forma unificada i rebre incidències en qualsevol ordinador i mòbil.
+                                    Si en el futur vols fer servir una base de dades diferent, pots enganxar el format JSON aquí:
                                 </p>
                                 
                                 <form onSubmit={handleSaveSettings} className="space-y-4">
