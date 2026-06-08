@@ -36,23 +36,23 @@
         try {
             let firebaseConfig = null;
             
-            // 1. Mirem si l'usuari té una configuració personalitzada desada al navegador
-            const savedConfig = localStorage.getItem('escola_firebase_config');
-            if (savedConfig) {
-                try {
-                    firebaseConfig = JSON.parse(savedConfig);
-                    window.fb.usingLocalSettings = true;
-                } catch (e) {
-                    console.error("Configuració desada invàlida");
+            // 1. Prioritat absoluta a la configuració fixada a dalt (La teva de l'escola)
+            if (la_meva_configuracio_firebase.apiKey && la_meva_configuracio_firebase.apiKey !== "EL_TEU_API_KEY") {
+                firebaseConfig = la_meva_configuracio_firebase;
+            } else {
+                // 2. Si no, mirem si l'usuari té una configuració personalitzada desada al navegador
+                const savedConfig = localStorage.getItem('escola_firebase_config');
+                if (savedConfig) {
+                    try {
+                        firebaseConfig = JSON.parse(savedConfig);
+                        window.fb.usingLocalSettings = true;
+                    } catch (e) {
+                        console.error("Configuració desada invàlida");
+                    }
                 }
             }
             
-            // 2. Si no, usem la configuració fixada a dalt que acabes d'enviar de Firebase
-            if (!firebaseConfig && la_meva_configuracio_firebase.apiKey && la_meva_configuracio_firebase.apiKey !== "EL_TEU_API_KEY") {
-                firebaseConfig = la_meva_configuracio_firebase;
-            } 
-            
-            // 3. Si no, alternativa per a l'entorn de proves local
+            // 3. Si no, alternativa per a l'entorn de proves local de la plataforma
             if (!firebaseConfig && window.__firebase_config) {
                 firebaseConfig = JSON.parse(window.__firebase_config);
             }
@@ -164,7 +164,7 @@
                             await window.fb.auth.signInAnonymously();
                         } catch (err) {
                             console.error("Error d'autenticació Firebase:", err);
-                            setDbErrorMsg("Error d'autenticació. Comprova que l'accés Anònim estigui habilitat.");
+                            setDbErrorMsg("Error d'autenticació. Comprova que l'accés Anònim estigui habilitat a Authentication.");
                             setupLocalStorageFallback();
                         }
                     };
@@ -220,7 +220,7 @@
                     setDbErrorMsg(null); 
                 }, (error) => {
                     console.error("Error Firestore onSnapshot:", error);
-                    setDbErrorMsg("No es pot connectar. Comprova que les regles de Firestore de la teva consola siguin públiques.");
+                    setDbErrorMsg("Error de lectura: Comprova que les regles de Firestore de la consola estiguin configurades correctament.");
                     setupLocalStorageFallback();
                 });
 
