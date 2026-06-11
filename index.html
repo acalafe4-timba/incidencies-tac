@@ -197,7 +197,7 @@
                 }, (error) => {
                     console.error("Error Firestore onSnapshot:", error);
                     setDbErrorMsg("Falta de permisos a la base de dades Firestore.");
-                    setDetailedError("Firestore Error: " + error.message + ". Això sol passar si les regles de Firestore ('Rules') de la teva consola de Firebase estan bloquejant l'accés públic de lectura o escriptura.");
+                    setDetailedError("Firestore Error: " + error.message + " (Codi d'error: " + (error.code || 'Desconegut') + "). Això passa si la base de dades no s'ha creat o si les regles ('Rules') bloquegen l'accés.");
                     setupLocalStorageFallback();
                 });
 
@@ -373,7 +373,7 @@
                     setModal({
                         isOpen: true,
                         title: 'Incidència Resolta! 🎉',
-                        message: 'Vols eliminar definitivament aquesta incidència de la base de dades ara que s\'ha completat?',
+                        message: 'Vols eliminar definitivament aquesta incidència de la base de dades de l\'escola ara que s\'ha completat?',
                         confirmText: 'Sí, eliminar',
                         cancelText: 'No, conservar',
                         showCancel: true,
@@ -449,7 +449,7 @@
 
                                     {detailedError && (
                                         <div className="bg-red-50 p-4 rounded-2xl border border-red-100 text-xs text-red-800">
-                                            <p className="font-black mb-1">ÚLTIM ERROR REGISTRAT:</p>
+                                            <p className="font-black mb-1">ÚLTIM ERROR DE GOOGLE FIREBASE:</p>
                                             <p className="font-mono break-all bg-white/50 p-2 rounded mt-1 border border-red-100">{detailedError}</p>
                                         </div>
                                     )}
@@ -463,6 +463,9 @@
                                             </li>
                                             <li>
                                                 Ves al menú esquerre a la secció **Build** (Generar) &gt; **Firestore Database**.
+                                            </li>
+                                            <li>
+                                                <strong>Molt Important:</strong> Si no l'has creat mai, clica a <strong>"Crear base de datos"</strong> (Create database) i selecciona la ubicació de la teva base de dades.
                                             </li>
                                             <li>
                                                 Fes clic a la pestanya de dalt que diu **Rules** (Regles).
@@ -508,7 +511,7 @@ service cloud.firestore {
                             className="bg-red-500 text-white p-3 text-xs font-bold text-center flex items-center justify-center gap-2 animate-in z-40 relative cursor-pointer hover:bg-red-600 transition-colors"
                         >
                             <Icon name="AlertTriangle" size={14} />
-                            <span>{dbErrorMsg} (Clica aquí per solucionar-ho) ☁️</span>
+                            <span>{dbErrorMsg} (Clica aquí per saber què fer) ☁️</span>
                         </div>
                     )}
 
@@ -641,7 +644,7 @@ service cloud.firestore {
                                         </div>
                                         <div className="space-y-2">
                                             <label className="block text-xs font-black text-slate-500 uppercase tracking-widest ml-2">Espai / Aula</label>
-                                            <input type="text" value={aula} onChange={e => setAula(e.target.value)} placeholder="On passa el problema?" className="w-full p-4 rounded-2xl bg-white border border-slate-200 outline-none focus:ring-4 focus:ring-blue-100 transition-all font-semibold" required />
+                                            <input type="text" value={aula} onChange={e => setAula(e.target.value)} placeholder="On passa el problem?" className="w-full p-4 rounded-2xl bg-white border border-slate-200 outline-none focus:ring-4 focus:ring-blue-100 transition-all font-semibold" required />
                                         </div>
                                     </div>
 
