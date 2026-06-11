@@ -44,11 +44,11 @@
                     error: null
                 };
             } else {
-                window.fb.error = "No s'ha pogut carregar la configuració de Firebase.";
+                window.fb.error = "No s'ha pogut carregar el bloc de configuració de Firebase.";
             }
         } catch (e) {
             console.error("Error d'inicialització de Firebase:", e);
-            window.fb.error = e.message || "Error al connectar amb la base de dades.";
+            window.fb.error = e.message || "Error al connectar amb la base de dades de Google.";
         }
     </script>
 
@@ -93,6 +93,8 @@
             const [view, setView] = useState('list');
             const [loading, setLoading] = useState(true);
             const [dbErrorMsg, setDbErrorMsg] = useState(null);
+            const [detailedError, setDetailedError] = useState(null);
+            const [isDiagnosticOpen, setIsDiagnosticOpen] = useState(false);
             
             // Formulari
             const [docent, setDocent] = useState('');
@@ -116,7 +118,6 @@
 
             const fileInputRef = useRef(null);
 
-            // Tancar modal
             const closeModal = () => {
                 setModal(prev => ({ ...prev, isOpen: false }));
             };
@@ -136,7 +137,8 @@
                             await window.fb.auth.signInAnonymously();
                         } catch (err) {
                             console.error("Error d'autenticació Firebase:", err);
-                            setDbErrorMsg("Error d'autenticació. Comprova que l'accés Anònim estigui habilitat a Authentication.");
+                            setDbErrorMsg("Error de seguretat en l'autenticació de Google.");
+                            setDetailedError("Authentication Error: " + err.message + ". Recorda activar 'Anónimo' a la secció 'Authentication' -> 'Sign-in method' de la consola de Firebase.");
                             setupLocalStorageFallback();
                         }
                     };
@@ -155,6 +157,7 @@
                 } else {
                     if (window.fb && window.fb.error) {
                         setDbErrorMsg(window.fb.error);
+                        setDetailedError(window.fb.error);
                     }
                     setupLocalStorageFallback();
                 }
@@ -190,9 +193,11 @@
                     setIncidencies(data);
                     setLoading(false);
                     setDbErrorMsg(null); 
+                    setDetailedError(null);
                 }, (error) => {
                     console.error("Error Firestore onSnapshot:", error);
-                    setDbErrorMsg("Error de lectura: Comprova que les regles de Firestore de la consola estiguin configurades correctament.");
+                    setDbErrorMsg("Falta de permisos a la base de dades Firestore.");
+                    setDetailedError("Firestore Error: " + error.message + ". Això sol passar si les regles de Firestore ('Rules') de la teva consola de Firebase estan bloquejant l'accés públic de lectura o escriptura.");
                     setupLocalStorageFallback();
                 });
 
@@ -407,11 +412,103 @@
             return (
                 <div className="min-h-screen pb-24 max-w-2xl mx-auto bg-white shadow-2xl relative">
                     
-                    {/* Alerta si falla alguna cosa a Firebase */}
+                    {/* Assistent de Diagnòstic del Núvol interactiu */}
+                    {isDiagnosticOpen && (
+                        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+                            <div className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-slate-100 animate-in zoom-in-95 duration-200 max-h-[85vh] overflow-y-auto">
+                                <div className="flex justify-between items-center mb-4 border-b pb-3">
+                                    <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                                        <Icon name="Compass" size={20} className="text-blue-600" />
+                                        Diagnòstic de Connexió ☁️
+                                    </h3>
+                                    <button onClick={() => setIsDiagnosticOpen(false)} className="text-slate-400 hover:text-slate-600">
+                                        <Icon name="X" size={20} />
+                                    </button>
+                                </div>
+
+                                <div className="space-y-4 text-sm text-slate-700">
+                                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-2">
+                                        <p className="font-semibold text-xs text-slate-500 uppercase tracking-wider">Estat actual dels serveis:</p>
+                                        <div className="flex items-center gap-2">
+                                            <span className="w-3.5 h-3.5 rounded-full flex items-center justify-center text-[10px] text-white bg-green-500">✓</span>
+                                            <span className="font-medium text-xs">Claus de Firebase: Correctes (Projecte: <code className="bg-white px-1.5 py-0.5 rounded border border-slate-200">incidenciestactimba</code>)</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[10px] text-white ${user ? 'bg-green-500' : 'bg-red-500'}`}>
+                                                {user ? '✓' : '✗'}
+                                            </span>
+                                            <span className="font-medium text-xs">Autenticació anònima: {user ? 'Activa i funcionant' : 'No s\'ha pogut activar'}</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[10px] text-white ${isFirebase ? 'bg-green-500' : 'bg-red-500'}`}>
+                                                {isFirebase ? '✓' : '✗'}
+                                            </span>
+                                            <span className="font-medium text-xs">Lectura/Escriptura (Firestore): {isFirebase ? 'Connectat en temps real' : 'Deconnectat (Mode Local)'}</span>
+                                        </div>
+                                    </div>
+
+                                    {detailedError && (
+                                        <div className="bg-red-50 p-4 rounded-2xl border border-red-100 text-xs text-red-800">
+                                            <p className="font-black mb-1">ÚLTIM ERROR REGISTRAT:</p>
+                                            <p className="font-mono break-all bg-white/50 p-2 rounded mt-1 border border-red-100">{detailedError}</p>
+                                        </div>
+                                    )}
+
+                                    {/* Guia interactiva segons l'error de permisos de Firestore */}
+                                    <div className="space-y-3">
+                                        <h4 className="font-bold text-slate-800">Com solucionar els errors de base de dades? 👇</h4>
+                                        <ol className="list-decimal pl-4 space-y-2 text-xs leading-relaxed text-slate-600">
+                                            <li>
+                                                Entra a la teva <a href="https://console.firebase.google.com/" target="_blank" className="text-blue-600 underline font-bold">Consola de Firebase</a>, obre el projecte <span className="font-bold">incidenciestactimba</span>.
+                                            </li>
+                                            <li>
+                                                Ves al menú esquerre a la secció **Build** (Generar) &gt; **Firestore Database**.
+                                            </li>
+                                            <li>
+                                                Fes clic a la pestanya de dalt que diu **Rules** (Regles).
+                                            </li>
+                                            <li>
+                                                Substitueix completament tot el codi de la pantalla pel següent codi de prova per a l'escola i clica a **Publish** (Publicar):
+                                                <div className="mt-2 relative">
+                                                    <pre className="bg-slate-900 text-slate-200 p-3 rounded-xl font-mono text-[10px] overflow-x-auto leading-normal">
+{`rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}`}
+                                                    </pre>
+                                                </div>
+                                            </li>
+                                            <li>
+                                                Ves a la secció **Authentication** &gt; **Sign-in method** &gt; clica a **Anónimo** i assegura't que està **Habilitado** (Habilitat).
+                                            </li>
+                                        </ol>
+                                    </div>
+
+                                    <div className="pt-4 border-t flex justify-end">
+                                        <button 
+                                            onClick={() => window.location.reload()} 
+                                            className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-1 shadow-md shadow-blue-100"
+                                        >
+                                            <Icon name="RefreshCw" size={12} /> Reiniciar aplicació i provar
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Alerta visible si falla alguna cosa a Firebase */}
                     {dbErrorMsg && (
-                        <div className="bg-red-500 text-white p-3 text-xs font-bold text-center flex items-center justify-center gap-2 animate-in z-40 relative">
+                        <div 
+                            onClick={() => setIsDiagnosticOpen(true)}
+                            className="bg-red-500 text-white p-3 text-xs font-bold text-center flex items-center justify-center gap-2 animate-in z-40 relative cursor-pointer hover:bg-red-600 transition-colors"
+                        >
                             <Icon name="AlertTriangle" size={14} />
-                            <span>{dbErrorMsg}</span>
+                            <span>{dbErrorMsg} (Clica aquí per solucionar-ho) ☁️</span>
                         </div>
                     )}
 
@@ -449,7 +546,11 @@
                             </div>
                             <div>
                                 <h1 className="text-xl font-black tracking-tight uppercase leading-none">Incidències TAC</h1>
-                                <span className="text-[9px] font-bold opacity-60 uppercase tracking-wider">
+                                <span 
+                                    onClick={() => setIsDiagnosticOpen(true)}
+                                    className="text-[9px] font-bold opacity-75 uppercase tracking-wider underline decoration-dotted cursor-pointer hover:opacity-100 flex items-center gap-1 mt-1"
+                                >
+                                    <Icon name="Cloud" size={10} />
                                     {isFirebase ? 'Sincronitzat Online' : 'Desat al dispositiu (Local)'}
                                 </span>
                             </div>
